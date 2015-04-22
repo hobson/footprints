@@ -15,6 +15,7 @@ $(function(){
     Footprints.post.read_tracker.stayed_long_enough = false;
     Footprints.post.state.title = "";
     Footprints.post.state.body = "";
+    Footprints.post.state.fantastic_timeout = null;
     var ed;
 
     Footprints.post.editor.toggle_options = function() {
@@ -62,17 +63,17 @@ $(function(){
         Footprints.post.editor.editing_node = null;
     };
     Footprints.post.toggle_fantastic = function() {
-        $(".fantastic_form").submit();
+        var ele = $(this);
+        ele.parents(".fantastic_form").submit();
     };
     Footprints.post.read_tracker.mark_read = function() {
         $(".read_form").submit();
     };
     Footprints.post.read_tracker.check_scroll = function() {
         if($(window).scrollTop() + $(window).height() > $(document).height() - 1280) {
-            Footprints.post.read_tracker.saw_bottom = true;
+            // Footprints.post.read_tracker.saw_bottom = true;
             $(window).unbind("scroll");
             // Footprints.post.read_tracker.mark_read_if_read();
-
             // Load next posts.
             Footprints.post.actions.load_next_posts();
         }
@@ -88,13 +89,13 @@ $(function(){
     };
     Footprints.post.read_tracker.calculate_from_lines_and_chars = function(lines, chars) {
         // seconds = (chars * .11693548387096774193) - (3.63089330024813895755 * lines);
-        seconds = 1000 * ((lines * 0.15) + (chars * 0.032));
+        seconds = 1000 * ((lines * 0.05) + (chars * 0.012));
         return seconds;
     };
     Footprints.post.read_tracker.time_estimate = function() {
         var chars = $(".post .body").text().length;
         try {
-            var lines = $(".post .body").text().match(/\n/g).length;    
+            var lines = $(".post .body").text().match(/\n/g).length;
         } catch (err) {
             var lines = 0;
         }
@@ -108,8 +109,8 @@ $(function(){
                 'last_timestamp': window.Footprints.state.last_timestamp
             },
             "success": Footprints.post.handlers.more_posts_loaded
-        })
-    }
+        });
+    };
     Footprints.post.handlers.more_posts_loaded = function(resp) {
         if (resp.success) {
             $(".posts").append(resp.html);
@@ -124,16 +125,17 @@ $(function(){
                 $(".the_start").addClass("visible");
             }
         }
-    }
+    };
     Footprints.post.handlers.fantastic_form_callback = function(json) {
+        clearTimeout(Footprints.post.state.fantastic_timeout);
         if (json.num_people > 1) {
             $(".post_" + json.post_id + " .fantastic_button .num_agree .number").html(json.num_people);
             $(".post_" + json.post_id + " .fantastic_button .num_agree").addClass("visible");
-            setTimeout(function(){
+            Footprints.post.state.fantastic_timeout = setTimeout(function(){
                 $(".post_" + json.post_id + " .fantastic_button .num_agree").removeClass("visible");
-            }, 4000);
+            }, 8000);
         }
-    }
+    };
     Footprints.post.actions.init = function() {
         $(".fantastic_form").on('click', '.fantastic_button', function(){
             var ele = $(this);
@@ -145,7 +147,16 @@ $(function(){
                 $("input[name=on]", form).val("False");
             }
             form.submit();
+            return false;
         });
+        if ($(".read_form").length > 0) {
+            $(".read_form").ajaxForm({
+                success: function(json) {
+                    $(".num_reads .num").html(json.num_reads);
+                }
+            });
+            setTimeout(Footprints.post.read_tracker.enough_time_callback, Footprints.post.read_tracker.time_estimate());
+        }
         if ($(".fantastic_form").length > 0) {
             $(".fantastic_form").ajaxForm({
                 success: Footprints.post.handlers.fantastic_form_callback
@@ -153,6 +164,8 @@ $(function(){
         }
         $(window).scroll(Footprints.post.read_tracker.check_scroll);
         Footprints.post.read_tracker.check_scroll();
+        // $(".fantastic_button").click(Footprints.post.toggle_fantastic);
+        hljs.initHighlightingOnLoad();
     };
     Footprints.post.actions.init();
 

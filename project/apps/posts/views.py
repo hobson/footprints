@@ -1,6 +1,8 @@
 import datetime
 import json
+import pytz
 import re
+import random
 import uuid
 
 from dropbox.client import DropboxOAuth2Flow, DropboxClient
@@ -145,6 +147,15 @@ def my_drafts(request, author=None):
     return locals()
 
 
+@render_to("posts/author.html")
+@login_required
+def my_prospects(request, author=None):
+    author = request.user.get_profile()
+    is_me = True
+    posts = Post.objects.filter(is_draft=True, prospect=True, author=author).order_by("-written_on", "title")
+    return locals()
+
+
 def get_author_from_domain(request):
     domain = request.get_host()
     if domain[:4] == "www.":
@@ -152,6 +163,43 @@ def get_author_from_domain(request):
     domain = Author.objects.get(blog_domain__iexact=domain)
     return domain
 
+def get_related_posts(post):
+    try:
+        top = Post.objects.exclude(dayone_image=None).exclude(dayone_image="").filter(author=post.author, is_draft=False).annotate(fantastics=Count('fantastic')).order_by('-fantastics')[:6]
+        random_selection = Post.objects.exclude(dayone_image=None).exclude(dayone_image="").filter(author=post.author, is_draft=False).order_by("?")[:2]
+        recent = Post.objects.exclude(dayone_image=None).exclude(dayone_image="").filter(author=post.author, is_draft=False).order_by("-written_on")[:4]
+        options = []
+        for t in top:
+            if t not in options and t.pk != post.pk:
+                options.append(t)
+        for r in random_selection:
+            if r not in options and r.pk != post.pk:
+                options.append(r)
+        for r in recent:
+            if r not in options and r.pk != post.pk:
+                options.append(r)
+
+        return random.sample(options, 3)
+    except:
+        import traceback; traceback.print_exc();
+
+    return []
+
+# def get_related_posts(post):
+#     try:
+#         top = Post.objects.filter(author=post.author, is_draft=False).exclude(pk=post.pk).annotate(fantastics=Count('fantastic')).order_by('-fantastics')[:6]
+#         random_selection = Post.objects.filter(author=post.author, is_draft=False).exclude(pk__in=[post.pk]+[t.pk for t in top]).order_by("?")[:2]
+#         options = []
+#         for t in top:
+#             options.append(t)
+#         for r in random_selection:
+#             options.append(r)
+
+#         return random.sample(options, 3)
+#     except:
+#         import traceback; traceback.print_exc();
+
+#     return []
 
 @render_to("posts/blog.html")
 def blog(request):
@@ -159,7 +207,13 @@ def blog(request):
         fantastic_form = FantasticForm()
         on_blog = True
         author = get_author_from_domain(request)
-        posts = Post.objects.filter(author=author, is_draft=False).order_by("-written_on", "title")
+        # posts = Post.objects.filter(author=author, is_draft=False).order_by("-written_on", "title")[:POSTS_PER_PAGINATION]
+        # posts = next_10_annotated_posts_and_forms(author, request)
+        posts = author.published_posts[:POSTS_PER_PAGINATION]
+        if len(posts) > 0:
+            last_timestamp = posts[len(posts)-1].written_on.strftime("%s")
+        else:
+            last_timestamp = False
         if author.user == request.user:
             is_me = True
 
@@ -182,29 +236,34 @@ def post(request, title=None):
                 author = request.user.get_profile()
             except:
                 pass
-    
+
     if not author:
         return HttpResponseRedirect(reverse("posts:home"))
 
-    if Post.objects.filter(slug__iexact=title, author=author).count() == 0:
-        print request.path
+    if Post.objects.filter(slug__iexact=title, author=author).count() == 0 and Post.objects.filter(permalink_path__iexact="/%s" % title, author=author).count() == 0:
+        # print request.path
         for r in Redirect.objects.filter(author=author):
             if re.match("%s" % r.old_url, request.path) or re.match(r"%s" % r.old_url, request.path, flags=re.IGNORECASE):
-                print "matched: %s" % r.new_url
+                # print "matched: %s" % r.new_url
                 return HttpResponseRedirect(r.new_url)
 
         return HttpResponseRedirect(reverse("posts:home"))
-    
-    post = Post.objects.get(slug__iexact=title, author=author)
+
+    if Post.objects.filter(slug__iexact=title, author=author).count() > 0:
+        post = Post.objects.get(slug__iexact=title, author=author)
+    else:
+        post = Post.objects.get(permalink_path__iexact="/%s" % title, author=author)
+
+    related_posts = get_related_posts(post)
+    # print related_posts
     is_mine = post.author.user == request.user
 
     if not request.user.is_authenticated():
         if "uuid" not in request.session:
             request.session["uuid"] = uuid.uuid1()
 
-
     if not is_mine and post.is_draft and not post.allow_private_viewing:
-        raise Http404("Post not found. Maybe it never was, maybe it's a draft and you're not logged in!")
+        raise Http404("Post not found. Maybe it never existed, or maybe it's a draft and you're not logged in!")
 
     if is_mine:
         form = PostForm(instance=post)
@@ -302,7 +361,7 @@ def save_revision(request, author=None, title=None):
             new_url = reverse("posts:post", args=(new_post.slug,))
     else:
         print form
-    
+
     ret = {"success": success, "new_url": new_url}
     return ret
 
@@ -331,10 +390,54 @@ def revision(request, author=None, pk=None):
     return locals()
 
 
+def revert_revision(request, pk=None):
+    revision = PostRevision.objects.get(pk=pk, author__slug__iexact=request.user.get_profile().slug)
+    post = revision.post
+    post.body = revision.body
+    post.title = revision.title
+    post.save()
+
+    return HttpResponseRedirect(reverse("posts:revisions", args=(post.author.slug, post.slug,) ))
+
 def new(request):
     author = Author.objects.get(user=request.user)
     post = Post.objects.create(author=author)
     return HttpResponseRedirect("%s?editing=true" % reverse("posts:edit", args=(post.slug,)))
+
+
+@ajax_request
+def toggle_prospect(request, post_id):
+    try:
+        post = Post.objects.get(pk=post_id, author=request.user.get_profile())
+        post.prospect = not post.prospect
+        post.save()
+        return {
+            "success": True,
+            "prospect": post.prospect,
+            "pk": post.pk,
+        }
+    except:
+        import traceback; traceback.print_exc();
+        pass
+
+    return {"success": False}
+
+@ajax_request
+def toggle_featured(request, post_id):
+    try:
+        post = Post.objects.get(pk=post_id, author=request.user.get_profile())
+        post.featured = not post.featured
+        post.save()
+        return {
+            "success": True,
+            "featured": post.featured,
+            "pk": post.pk,
+        }
+    except:
+        import traceback; traceback.print_exc();
+        pass
+
+    return {"success": False}
 
 
 @ajax_request
@@ -386,7 +489,7 @@ def next_10_annotated_posts_and_forms(author, request, last_timestamp=None):
     if not request.user.is_authenticated():
         if "uuid" not in request.session:
             request.session["uuid"] = uuid.uuid1()
-    
+
     is_mine = author == request.user.get_profile()
 
     for p in posts:
@@ -550,6 +653,7 @@ def next_posts(request, author=None):
         author = Author.objects.get(slug__iexact=author)
         last_timestamp = datetime.datetime.fromtimestamp(int(request.GET["last_timestamp"]))
         posts = author.published_posts.filter(written_on__lt=last_timestamp)[:POSTS_PER_PAGINATION]
+        on_blog = True
         last_timestamp = False
         if len(posts) > 0:
             last_timestamp = posts[len(posts)-1].written_on.strftime("%s")
@@ -762,7 +866,7 @@ def facebook_auth_finish(request):
 
 def rss(request):
     author = get_author_from_domain(request)
-    posts = Post.objects.filter(author=author, is_draft=False, email_publish_intent=True).order_by("written_on", "title")
+    posts = Post.objects.filter(author=author, is_draft=False, email_publish_intent=True, written_on__gte=datetime.datetime.now()-datetime.timedelta(days=30)).order_by("written_on", "title")
     
     f = feedgenerator.Rss201rev2Feed(
         title=author.blog_name,
@@ -776,18 +880,23 @@ def rss(request):
         html = ""
         if p.dayone_image_blog_size_url:
             html += "<img src='%s' style='max-width: 100%%;' />" % p.dayone_image_blog_size_url
-        # html += p.body_html
-        if p.description and p.description != "by %s" % p.author.name:
-            html += "<p>%s</p>" % p.description
-        else:
-            html += p.body_html
+        html += p.body_html
+        # if p.description and p.description != "by %s" % p.author.name:
+        #     html += "<p>%s</p>" % p.description
+        # else:
+        #     html += p.body_html
         title = p.title_html
         if title[:3] == "<p>" and title[-4:] == "</p>":
             title = title[3:-4]
+        pubdate = None
+        if p.written_on:
+            pst = pytz.timezone('America/Vancouver')
+            pubdate = pst.normalize(p.written_on.astimezone(pst))
+        
         f.add_item(
             title=title,
             link=p.full_permalink,
-            pubdate=p.written_on,
+            pubdate=pubdate,
             description=html,
         )
     return HttpResponse(f.writeString('UTF-8'))

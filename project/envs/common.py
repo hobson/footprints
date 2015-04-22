@@ -1,4 +1,4 @@
-import os
+import sys
 from os.path import abspath, join, dirname
 from sys import path
 from envs.keys_and_passwords import *
@@ -31,6 +31,9 @@ DATABASES = {
         'PORT': '',
     }
 }
+if 'test' in sys.argv:
+    DATABASES['default'] = {'ENGINE': 'django.db.backends.sqlite3'}
+
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.memcached.PyLibMCCache',
@@ -48,9 +51,13 @@ ALLOWED_HOSTS = [
 ]
 
 # TIME_ZONE = 'America/Vancouver'
-TIME_ZONE = 'Asia/Bangkok'
-
+# TIME_ZONE = 'Asia/Bangkok'
+TIME_ZONE = 'UTC'
 LANGUAGE_CODE = 'en-us'
+USE_I18N = True
+USE_L10N = True
+USE_TZ = True
+
 
 SITE_ID = 1
 LOGIN_URL = '/accounts/login/'
@@ -63,7 +70,7 @@ MEDIA_ROOT = join(PROJECT_ROOT, "media_root")
 STATIC_ROOT = join(PROJECT_ROOT, "collected_static")
 STATIC_URL = '/static/'
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://localhost:8202"
 MEDIA_URL = '%s/media/' % BASE_URL
 
 STATICFILES_DIRS = ()

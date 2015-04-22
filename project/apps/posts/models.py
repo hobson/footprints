@@ -1,4 +1,5 @@
 import datetime
+import math
 import re
 import markdown
 from pyembed.markdown import PyEmbedMarkdown
@@ -7,13 +8,17 @@ from django.db import models
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
+# from django.core.cache.utils import make_template_fragment_key
 from django.core.urlresolvers import reverse
 from django.db.models.signals import post_save
 from sorl.thumbnail import get_thumbnail
 from utils.slughifi import unique_slug, slughifi
 from main_site.models import BaseModel
+from .util import FencedCodeExtension
 
 ENTITY_REGEX = re.compile("&[^\s]*;")
+BODY_HTML_CACHE_KEY = "post_body_%(pk)s"
+TITLE_HTML_CACHE_KEY = "post_title_%(pk)s"
 BIG_QUOTE = 1
 PHOTO_WITH_CAPTION = 2
 ARTICLE_SINGLE_IMAGE = 3
@@ -26,6 +31,7 @@ POST_TYPES = [
     (ARTICLE_MULTIPLE_IMAGES, "Article and a multiple images"),
     (BODY_WITH_NO_TITLE, "Body with no real title"),
 ]
+
 
 class Author(BaseModel):
     user = models.ForeignKey("auth.User", blank=True, null=True)
@@ -122,7 +128,7 @@ class Author(BaseModel):
     @property
     def dropbox_valid(self):
         return self.dropbox_access_token and self.dropbox_user_id
-    
+
     @property
     def dayone_valid(self):
         return self.dropbox_valid and self.dropbox_dayone_folder_path
@@ -174,8 +180,12 @@ class AbstractPost(BaseModel):
     post_type = models.IntegerField(choices=POST_TYPES)
     num_images = models.IntegerField(default=0)
     permalink_path = models.CharField(max_length=500, blank=True, null=True, editable=False)
+    num_read_seconds = models.IntegerField(default=60)
+    num_read_minutes = models.IntegerField(default=60)
 
     is_draft = models.BooleanField(default=True)
+    prospect = models.BooleanField(default=False)
+    featured = models.BooleanField(default=False)
     allow_comments = models.BooleanField(default=True)
 
     dayone_post = models.BooleanField(default=False, editable=False)
@@ -186,7 +196,7 @@ class AbstractPost(BaseModel):
     dayone_image_url = models.TextField(blank=True, null=True)
     dayone_image_blog_size_url = models.TextField(blank=True, null=True)
     dayone_image_thumb_size_url = models.TextField(blank=True, null=True)
-
+    dayone_image_related_size_url = models.TextField(blank=True, null=True)
 
     location_area = models.CharField(max_length=255, blank=True, null=True,)
     location_country = models.CharField(max_length=255, blank=True, null=True,)
@@ -194,7 +204,7 @@ class AbstractPost(BaseModel):
     longitude = models.FloatField(blank=True, null=True)
     location_name = models.CharField(max_length=255, blank=True, null=True, editable=False)
     time_zone_string = models.CharField(max_length=255, blank=True, null=True, editable=False)
-    
+
     weather_temp_f = models.IntegerField(blank=True, null=True)
     weather_temp_c = models.IntegerField(blank=True, null=True)
     weather_description = models.CharField(max_length=255, blank=True, null=True, editable=False)
@@ -212,6 +222,7 @@ class AbstractPost(BaseModel):
     twitter_status_id = models.CharField(max_length=255, blank=True, null=True, editable=False)
     twitter_retweets = models.IntegerField(blank=True, null=True, default=0)
     twitter_favorites = models.IntegerField(blank=True, null=True, default=0)
+    twitter_mentions = models.IntegerField(blank=True, null=True, default=0)
 
     facebook_publish_intent = models.BooleanField(default=True)
     facebook_published = models.BooleanField(default=False, editable=False)
@@ -225,15 +236,34 @@ class AbstractPost(BaseModel):
 
     email_publish_intent = models.BooleanField(default=False)
     allow_private_viewing = models.BooleanField(default=False)
+    custom_pitch = models.TextField(blank=True, null=True)
 
     def __unicode__(self, *args, **kwargs):
         return self.title
 
     def save(self, *args, **kwargs):
-        self.title_html = markdown.markdown(self.title, extensions=[PyEmbedMarkdown()]).replace("http://www.youtube.com", "https://www.youtube.com")
+        self.title_html = markdown.markdown(self.title, extensions=[
+            FencedCodeExtension(),
+            # 'markdown.extensions.extra',
+            PyEmbedMarkdown(),
+            # 'markdown.extensions.codehilite',
+            # 'fenced-code-blocks',
+            # 'cuddled-lists',
+            # 'footnotes',
+            # 'smarty-pants',
+        ]).replace("http://www.youtube.com", "https://www.youtube.com")
         if self.title_html[:3] == "<p>" and self.title_html[-4:] == "</p>":
             self.title_html = self.title_html[3:-4]
-        self.body_html = markdown.markdown(self.body, extensions=[PyEmbedMarkdown()]).replace("http://www.youtube.com", "https://www.youtube.com")
+        self.body_html = markdown.markdown(self.body, extensions=[
+            FencedCodeExtension(),
+            # 'markdown.extensions.extra',
+            PyEmbedMarkdown(),
+            # 'markdown.extensions.codehilite',
+            # 'fenced-code-blocks',
+            # 'cuddled-lists',
+            # 'footnotes',
+            # 'smarty-pants',
+        ]).replace("http://www.youtube.com", "https://www.youtube.com")
 
         self.num_images = self.body_html.count("<img")
         if not self.description or self.description == "Body" or self.description == "by %s" % self.author.name:
@@ -243,6 +273,15 @@ class AbstractPost(BaseModel):
                 self.description = "by %s" % self.author.name
         if self.dayone_image:
             self.num_images += 1
+
+        # lines = self.body.count("<br/>") + self.body.count("<br>") + self.body.count("<p/>")
+        chars = len(self.body)
+        # Average reading speed of 300 wpm, 5 letters per word plus a space.
+        self.num_read_seconds = round(1.0 * chars / 6 / 250 * 60)
+        self.num_read_minutes = round(self.num_read_seconds / 60.0)
+
+        # Invalidate any cached template.
+        # cache.delete(make_template_fragment_key('blog_post', [self.pk]))
 
         super(AbstractPost, self).save(*args, **kwargs)
 
@@ -294,7 +333,7 @@ class AbstractPost(BaseModel):
 
     @property
     def num_twitter_activity(self):
-        return (self.twitter_favorites or 0) + (self.twitter_retweets or 0)
+        return (self.twitter_favorites or 0) + (self.twitter_retweets or 0) + (self.twitter_mentions or 0)
 
     @property
     def permalink(self):
@@ -309,6 +348,13 @@ class AbstractPost(BaseModel):
     @property
     def full_permalink(self):
         return "%s%s" % (self.author.full_blog_domain, self.permalink)
+
+    @property
+    def pitch(self):
+        if self.custom_pitch:
+            return self.custom_pitch
+        else:
+            return "Find my writing valuable?  Please consider <a href='https://www.patreon.com/inkandfeet' target='_blank'>supporting me</a> on Patreon."
 
 
 class Post(AbstractPost):
@@ -379,7 +425,7 @@ class Post(AbstractPost):
         # if make_revision:
         #     cleaned_body = self.body.replace("<br/>", "\n").replace("<br>", "\n").replace("</div>", "\n")
         #     cleaned_body = ENTITY_REGEX.sub(" ", cleaned_body)
-            
+
         self.sort_datetime = self.date
         super(Post, self).save(*args, **kwargs)
 
@@ -395,6 +441,7 @@ class Post(AbstractPost):
         if update_thumbs:
             self.dayone_image_thumb_size_url = get_thumbnail(self.dayone_image, '100x100', crop="center", quality=75).url.split("?")[0]
             self.dayone_image_blog_size_url = get_thumbnail(self.dayone_image, '1792', quality=90).url.split("?")[0]
+            self.dayone_image_related_size_url = get_thumbnail(self.dayone_image, '504x384', crop="center", quality=85).url.split("?")[0]
             self.save()
 
     @property

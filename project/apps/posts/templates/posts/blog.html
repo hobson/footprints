@@ -2,7 +2,7 @@
 
 {% block title %}{{author.blog_name}}{% endblock %}
 {% block description %}A blog by {{author.name}}. Published on Footprints.{% endblock %}
-{% block author %}{% url "posts:blog" author.slug %}{% endblock %}
+{% block author %}{{post.author.full_blog_domain}}{% endblock %}
 {% block schema_name %}{{author.blog_name}}{% endblock %}
 {% block schema_description %}A blog by {{author.name}}. Published on Footprints.{% endblock %}
 {% block schema_author %}{{author.name}}{% endblock %}
@@ -11,12 +11,6 @@
 {% block og_description %}A blog by {{author.name}}. Published on Footprints.{% endblock %}
 {% block og_publish_time %}{{post.published_at|date:"c"}}{% endblock %}
 {% block og_update_time %}{{post.sort_datetime|date:"c"}}{% endblock %}
-
-{% block css %}{{block.super}}
-{% compress css %}
-<link rel="stylesheet" href="{{STATIC_URL}}posts/css/posts.css">
-{% endcompress %}
-{% endblock %}
 
 {% block js %}{{block.super}}
 <script type="text/javascript">
@@ -33,11 +27,12 @@
 {% endblock %}
 
 {% block main_content %}
-<div class="posts">
-    {% include "posts/_posts.html" %}
+<div class="post_content_area">
+    <div class="posts">
+        {% include "posts/_posts.html" %}
+    </div>
+    <div class="the_start">
+        &mdash; the start &mdash;
+    </div>
 </div>
-<div class="the_start">
-    &mdash; the start &mdash;
-</div>
-
 {% endblock %}

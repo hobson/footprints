@@ -14,6 +14,7 @@ $(function(){
     Footprints.post.read_tracker.stayed_long_enough = false;
     Footprints.post.state.title = "";
     Footprints.post.state.body = "";
+    Footprints.post.state.fantastic_timeout = null;
     var ed;
 
     Footprints.post.editor.toggle_options = function() {
@@ -74,16 +75,18 @@ $(function(){
         // $("")
     };
     Footprints.post.toggle_fantastic = function() {
-        $(".fantastic_form").submit();
+        var ele = $(this);
+        ele.parents(".fantastic_form").submit();
     };
     Footprints.post.read_tracker.mark_read = function() {
         $(".read_form").submit();
     };
     Footprints.post.read_tracker.check_scroll = function() {
-        if($(window).scrollTop() + $(window).height() > $(document).height() - 280) {
+        if($(window).scrollTop() + $(window).height() > $(document).height() - 1110) {
             Footprints.post.read_tracker.saw_bottom = true;
-            $(window).unbind("scroll");
+            $(window).unbind("scroll.read");
             Footprints.post.read_tracker.mark_read_if_read();
+            // $(".support").show();
         }
     };
     Footprints.post.read_tracker.enough_time_callback = function() {
@@ -97,15 +100,19 @@ $(function(){
     };
     Footprints.post.read_tracker.calculate_from_lines_and_chars = function(lines, chars) {
         // seconds = (chars * .11693548387096774193) - (3.63089330024813895755 * lines);
-        seconds = 1000 * ((lines * 0.15) + (chars * 0.032));
+        // seconds = 1000 * ((lines * 0.15) + (chars * 0.032));
+        // seconds = 1000 * ((lines * 0.05) + (chars * 0.012));
+        seconds = 1000 * 1.0 * chars / 6 / 300 * 60;
+
         return seconds;
     };
     Footprints.post.read_tracker.time_estimate = function() {
+        var lines;
         var chars = $(".post .body").text().length;
         try {
-            var lines = $(".post .body").text().match(/\n/g).length;    
+            lines = $(".post .body").text().match(/\n/g).length;
         } catch (err) {
-            var lines = 0;
+            lines = 0;
         }
         
         return Footprints.post.read_tracker.calculate_from_lines_and_chars(lines, chars);
@@ -130,7 +137,7 @@ $(function(){
                     $(".num_reads .num").html(json.num_reads);
                 }
             });
-            $(window).scroll(Footprints.post.read_tracker.check_scroll);
+            $(window).on("scroll.read", Footprints.post.read_tracker.check_scroll);
             Footprints.post.read_tracker.check_scroll();
             setTimeout(Footprints.post.read_tracker.enough_time_callback, Footprints.post.read_tracker.time_estimate());
         }
@@ -146,7 +153,14 @@ $(function(){
                     }
                 },
                 success: function(json) {
-                    $(".fantastic_button .num_agree").html(json.num_people).addClass("visible");
+                    clearTimeout(Footprints.post.state.fantastic_timeout);
+                    if (json.num_people > 1) {
+                        $(".fantastic_button .num_agree .number").html(json.num_people).addClass("visible");
+                        $(".fantastic_button .num_agree").addClass("visible");
+                        Footprints.post.state.fantastic_timeout = setTimeout(function(){
+                            $(".fantastic_button .num_agree").removeClass("visible");
+                        }, 12000);
+                    }
                 }
             });
         }
@@ -163,10 +177,12 @@ $(function(){
         $(".start_editing_button").click(Footprints.post.editor.start_editing);
         $(".cancel_editing_button").click(Footprints.post.editor.cancel_editing);
         $(".options_button").click(Footprints.post.editor.toggle_options);
+        $(".fantastic_button").click(Footprints.post.toggle_fantastic);
 
         if (window.location.href.indexOf("?editing=true") != -1) {
             Footprints.post.editor.start_editing();
         }
+        hljs.initHighlightingOnLoad();
         // bkLib.onDomLoaded(nicEditors.allTextAreas);
     };
     Footprints.post.actions.init();

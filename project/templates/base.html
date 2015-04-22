@@ -11,7 +11,7 @@
   <meta name="description" content="{% block description %}{% endblock %}">
 
   <!-- Google Authorship and Publisher Markup --> 
-  <link rel="author" href="{% block author %}{% endblock %}"/>
+  <link rel="author" href="{% block author %}{{post.author.full_blog_domain}}{% endblock %}"/>
   {# <link rel="publisher" href=” https://plus.google.com/[Google+_Page_Profile]"/> #}
   
   <!-- Schema.org markup for Google+ --> 
@@ -91,6 +91,7 @@
               <ul class="nav navbar-nav">
                 <li><a href="{% url "posts:my_writing" %}">All Writing</a></li>
                 <li><a href="{% url "posts:my_drafts" %}">Drafts</a></li>
+                <li><a href="{% url "posts:my_prospects" %}">Prospects</a></li>
                 <li><a href="{% url "posts:my_published" %}">Published</a></li>
                 <li><a href="{% url "posts:my_blog" %}">My Blog</a></li>
                 <li><a href="{% url "posts:new" %}">+New Post</a></li>
@@ -140,6 +141,11 @@
     <a href="{% url "main_site:terms" %}">Terms</a>
     <a href="{% url "main_site:faq" %}">FAQ</a>
 </div>
+{% else %}
+<div id="footer" class="footer reader">
+    Copyright <a href="http://www.inkandfeet.com">Ink and Feet, LLC</a>, 2015  &nbsp; | &nbsp; Powered by <a href="http://footprintsapp.com">Footprints</a>.
+</div>
+
 {% endif %}
   {% endblock %}
 
@@ -148,7 +154,9 @@
     <script>var STATIC_URL = "{{STATIC_URL}}";</script>
     <script src="{{STATIC_URL}}base/js/jquery-1.10.2.js"></script>
     <script src="{{STATIC_URL}}base/js/bootstrap.min.js"></script>
+    <script src="{{STATIC_URL}}main_site/js/site.js"></script>
     {% endcompress %}
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/highlight.min.js"></script>
   {% endblock %}
 
   <!--[if lt IE 7 ]>
